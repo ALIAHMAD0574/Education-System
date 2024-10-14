@@ -30,3 +30,12 @@ class Token(BaseModel):
 
 class TokenData(BaseModel):
     email: Union[str, None]
+
+class UserForgot(BaseModel):
+    email: str
+    new_password: str
+    confirm_password: str
+    
+# Message schema
+class Message(BaseModel):
+    message: str    
