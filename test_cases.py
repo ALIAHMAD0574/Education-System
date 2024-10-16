@@ -30,7 +30,7 @@ def create_user_preference(token):
 
     preference_data = {
         "difficulty_level": "intermediate",
-        "quiz_format": "multiple-choice",
+        "quiz_format": "mcqs",
         "topics": [1, 2]  # Replace with topic IDs from your `topics` table
     }
 
@@ -78,7 +78,7 @@ def create_topic(token, topic_name):
 def test_create_topics(token):
     if token:
         # List of topics to be inserted
-        topics = ["AI", "Machine Learning", "Data Science", "FastAPI"]
+        topics = ["AI", "Machine Learning", "Data Science", "FastAPI","Computer Science","DataBases"]
 
         for topic in topics:
             create_topic(token, topic)
@@ -88,8 +88,8 @@ def test_create_topics(token):
 def update_user_preference(token):
     updated_preference_data = {
         "difficulty_level": "medium",
-        "quiz_format": "quizes",
-        "topics": [2, 4]  # Updated topic IDs
+        "quiz_format": "mcqs",
+        "topics": [2, 4, 5,6 ]  # Updated topic IDs
     }
     
     response = requests.put(

@@ -11,6 +11,7 @@ from user_preference.models import Base as PreferencesBase
 
 app = FastAPI()
 
+
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
@@ -24,5 +25,5 @@ AccountsBase.metadata.create_all(bind=engine)
 PreferencesBase.metadata.create_all(bind=engine)
 
 # Include the routers
-app.include_router(accounts_router, prefix="/accounts", tags=["accounts"])
+app.include_router(accounts_router,prefix="/accounts", tags=["accounts"])
 app.include_router(preferences_router, prefix="/users", tags=["preferences"])
