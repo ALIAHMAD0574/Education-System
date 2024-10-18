@@ -15,6 +15,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 import json
 from pydantic import BaseModel,RootModel
 from langchain.output_parsers import PydanticOutputParser
+from langchain_community.tools import TavilySearchResults
 
 # "mcqs","true/false"
 
@@ -263,7 +264,8 @@ def generate_quiz_with_langchain(preferences, topics):
     return quiz_output
 
 @router.post("/generate-quiz/")
-def generate_quiz(user_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+def generate_quiz(db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    user_id = current_user.id
     # Fetch user preferences from the database
     preferences = db.query(models.UserPreference).filter(models.UserPreference.user_id == user_id).first()
     if not preferences:
@@ -285,3 +287,167 @@ def generate_quiz(user_id: int, db: Session = Depends(get_db), current_user: mod
 
     return {"quiz": quiz_output}
 
+@router.put("/track_performance", response_model=schemas.UserPerformanceResponse)
+def track_user_performance(
+    input_data: list[schemas.UserPerformanceCreate],  # Assuming input schema
+    db: Session = Depends(get_db), 
+    current_user: models.User = Depends(get_current_user)
+):
+    user_id = current_user.id  # Extracted from bearer token
+
+    total_questions = len(input_data)
+    correct_count = 0
+    incorrect_count = 0
+
+    for data in input_data:
+        topic_name = data.topic
+        is_correct = data.is_correct
+
+        # Find the topic in the database
+        topic = db.query(models.Topic).filter(models.Topic.name == topic_name).first()
+        if not topic:
+            raise HTTPException(status_code=404, detail=f"Topic {topic_name} not found")
+
+        # Find the user's performance for this topic
+        performance = db.query(models.UserPerformance).filter(
+            models.UserPerformance.user_id == user_id,
+            models.UserPerformance.topic_id == topic.id
+        ).first()
+
+        # If no performance entry exists, create one
+        if not performance:
+            performance = models.UserPerformance(
+                user_id=user_id,
+                topic_id=topic.id,
+                correct_count=0,
+                incorrect_count=0
+            )
+            db.add(performance)
+            db.commit()
+            db.refresh(performance)
+
+        # Update performance based on is_correct value
+        if is_correct == 'true':
+            performance.correct_count += 1
+            correct_count += 1  # Count correct for this session
+        else:
+            performance.incorrect_count += 1
+            incorrect_count += 1  # Count incorrect for this session
+
+        db.commit()
+
+    # Calculate the performance percentage for this session
+    percentage = (correct_count / total_questions) * 100 if total_questions > 0 else 0
+
+    # Return the detailed performance response
+    return {
+        "total_questions": total_questions,
+        "correct_count": correct_count,
+        "incorrect_count": incorrect_count,
+        "percentage": percentage
+    }
+
+def generate_tavily_prompt(topic_name: str) -> str:
+    """
+    Generates a Tavily search prompt based on the topic name.
+    """
+    return f"Find top learning resources for {topic_name}. The resources should include tutorials, articles, videos, and courses that help improve understanding and skills in {topic_name}. Focus on beginner to intermediate level materials, emphasizing practical examples and hands-on learning."
+
+@router.get("/recommend_resources")
+def recommend_resources_for_user(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    user_id = current_user.id
+
+    # Fetch the user's performance on all topics
+    user_performances = db.query(models.UserPerformance).filter(
+        models.UserPerformance.user_id == user_id
+    ).all()
+
+    if not user_performances:
+        raise HTTPException(status_code=404, detail="No performance data found for the user")
+
+    total_correct = 0
+    total_incorrect = 0
+    weak_topics = []
+
+    # Calculate overall performance and identify weak topics
+    for performance in user_performances:
+        total_correct += performance.correct_count
+        total_incorrect += performance.incorrect_count
+        total_attempts = performance.correct_count + performance.incorrect_count
+
+        if total_attempts > 0:
+            topic_accuracy = (performance.correct_count / total_attempts) * 100
+            if topic_accuracy < 90:  # Weak topic if accuracy is below 90%
+                weak_topics.append(performance.topic_id)
+
+    # Overall accuracy
+    total_attempts = total_correct + total_incorrect
+    overall_accuracy = (total_correct / total_attempts) * 100 if total_attempts > 0 else 0
+
+    # If the overall performance is below 90%, recommend resources
+    if overall_accuracy < 90:
+        resources = []
+
+        for topic_id in weak_topics:
+            topic = db.query(models.Topic).filter(models.Topic.id == topic_id).first()
+
+            if topic:
+                # Generate Tavily search prompt for the topic
+                search_prompt = generate_tavily_prompt(topic.name)
+
+                # Use Tavily API to search for resources related to the topic
+                tool = TavilySearchResults(
+                    max_results=5,
+                    search_depth="advanced",
+                    include_answer=True,
+                    include_raw_content=True,
+                    include_images=True,
+                )
+
+                response_tavily = tool.invoke({"query": search_prompt})
+                resources.append(
+                    {
+                        "topic": topic.name,
+                        "resources": response_tavily
+                    }
+                )
+
+        return {"overall_accuracy": overall_accuracy, "resources": resources}
+
+    return {"overall_accuracy": overall_accuracy, "resources": []}
+
+@router.get("/user_performance", response_model=schemas.UserOverallPerformanceResponse)
+def get_user_performance(
+    db: Session = Depends(get_db), 
+    current_user: models.User = Depends(get_current_user)
+):
+    user_id = current_user.id  # Extracted from bearer token
+
+    # Query the UserPerformance table to get the user's performance on all topics
+    user_performance = db.query(models.UserPerformance).filter(models.UserPerformance.user_id == user_id).all()
+
+    if not user_performance:
+        raise HTTPException(status_code=404, detail="No performance data found for the user")
+
+    # Create a list to hold performance results for each topic
+    overall_performance = []
+
+    # Loop through each topic performance and calculate the percentage
+    for performance in user_performance:
+        topic = db.query(models.Topic).filter(models.Topic.id == performance.topic_id).first()
+        if topic:
+            total_attempts = performance.correct_count + performance.incorrect_count
+            percentage = (performance.correct_count / total_attempts * 100) if total_attempts > 0 else 0
+            
+            overall_performance.append({
+                "topic": topic.name,
+                "correct_count": performance.correct_count,
+                "incorrect_count": performance.incorrect_count,
+                "percentage": percentage
+            })
+
+    # Return the overall performance
+    return {"user_id": user_id, "overall_performance": overall_performance}

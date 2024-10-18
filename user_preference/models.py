@@ -3,11 +3,24 @@ from sqlalchemy.orm import relationship
 from database import Base
 from accounts.models import User  # Import the User model from accounts
 
+class UserPerformance(Base):
+    __tablename__ = 'user_performance'
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, index=True)  # Assuming you're tracking by user
+    topic_id = Column(Integer, ForeignKey('topics.id'))
+    correct_count = Column(Integer, default=0)
+    incorrect_count = Column(Integer, default=0)
+    
+    topic = relationship("Topic", back_populates="performances")
+
 class Topic(Base):
     __tablename__ = 'topics'
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, unique=True, index=True)
 
+    performances = relationship("UserPerformance", back_populates="topic")
+    
 class UserPreference(Base):
     __tablename__ = 'user_preferences'
     id = Column(Integer, primary_key=True, index=True)

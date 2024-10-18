@@ -27,3 +27,33 @@ class UserPreferenceResponse(BaseModel):
 
     class Config:
         orm_mode = True
+
+
+class UserPerformanceCreate(BaseModel):
+    topic: str
+    is_correct: str  # You might want to use a boolean here for easier processing
+
+class UserPerformanceResponse(BaseModel):
+    total_questions: int
+    correct_count: int
+    incorrect_count: int
+    percentage: float
+
+    class Config:
+        orm_mode = True
+
+class UserTopicPerformance(BaseModel):
+    topic: str
+    correct_count: int
+    incorrect_count: int
+    percentage: float
+
+    class Config:
+        orm_mode = True
+
+class UserOverallPerformanceResponse(BaseModel):
+    user_id: int
+    overall_performance: List[UserTopicPerformance]
+
+    class Config:
+        orm_mode = True        
