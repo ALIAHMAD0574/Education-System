@@ -451,3 +451,38 @@ def get_user_performance(
 
     # Return the overall performance
     return {"user_id": user_id, "overall_performance": overall_performance}
+
+@router.get("/gettopics")
+def get_all_topics(db: Session = Depends(get_db)):
+    topics = db.query(models.Topic).all()
+    return topics
+
+@router.get("/profile", response_model=schemas.UserProfileResponse)
+def get_user_profile(
+    db: Session = Depends(get_db), 
+    # current_user: models.User = Depends(get_current_user)
+):
+    user_id = 1  # Extracted from bearer token
+
+    # Fetch user information
+    user = db.query(models.User).filter(models.User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    # Fetch user topics
+    user_topics = db.query(models.UserTopic).filter(models.UserTopic.user_id == user_id).all()
+    topics = [db.query(models.Topic).filter(models.Topic.id == ut.topic_id).first() for ut in user_topics]
+
+    # Prepare the response
+    selected_topics = [schemas.UserTopicResponse(id=topic.id, name=topic.name) for topic in topics if topic]
+
+    return schemas.UserProfileResponse(
+        first_name=user.first_name,
+        last_name=user.last_name,
+        email=user.email,
+        address=user.address,
+        phone_number=user.phone_number,
+        education=user.education,
+        selected_topics=selected_topics
+    )
+

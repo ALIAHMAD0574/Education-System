@@ -57,3 +57,19 @@ class UserOverallPerformanceResponse(BaseModel):
 
     class Config:
         orm_mode = True        
+
+class UserTopicResponse(BaseModel):
+    id: int
+    name: str
+
+class UserProfileResponse(BaseModel):
+    first_name: str
+    last_name: str
+    email: str
+    address: str
+    phone_number: str
+    education: str
+    selected_topics: List[UserTopicResponse]
+
+    class Config:
+        orm_mode = True
