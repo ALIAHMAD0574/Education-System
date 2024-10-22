@@ -39,6 +39,14 @@ class UserTopic(Base):
     user = relationship("User", back_populates="user_topics")
     topic = relationship("Topic", back_populates="user_topics")
 
+class Question(Base):
+    __tablename__ = 'questions'
+    id = Column(Integer, primary_key=True)
+    topic_id = Column(Integer, ForeignKey('topics.id'))
+    question = Column(String, nullable=False)
+    options = Column(String, nullable=False)  # JSON stored as string
+    correct = Column(String, nullable=False)
+
 User.preferences = relationship("UserPreference", back_populates="user", uselist=False)
 User.user_topics = relationship("UserTopic", back_populates="user", cascade="all, delete-orphan")
 Topic.user_topics = relationship("UserTopic", back_populates="topic", cascade="all, delete-orphan")

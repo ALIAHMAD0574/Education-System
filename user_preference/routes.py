@@ -55,42 +55,50 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
         raise credentials_exception
     return user
 
-# Create user preference
+
 @router.post("/preferences", response_model=schemas.UserPreferenceResponse)
-def create_user_preference(preference: schemas.UserPreferenceCreate, 
-                           db: Session = Depends(get_db), 
-                           current_user: models.User = Depends(get_current_user)):
+def create_or_update_user_preference(
+    preference: schemas.UserPreferenceCreate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
     # Check if the user already has a preference
     existing_preference = db.query(models.UserPreference).filter_by(user_id=current_user.id).first()
-    if existing_preference:
-        raise HTTPException(status_code=400, detail="User preferences already exist. Please update your preferences.")                       
-
 
     # Ensure topics exist
     topics = db.query(models.Topic).filter(models.Topic.id.in_(preference.topics)).all()
     if len(topics) != len(preference.topics):
         raise HTTPException(status_code=400, detail="One or more topics not found")
 
-    # Create preference entry
-    user_pref = models.UserPreference(
-        user_id=current_user.id,
-        difficulty_level=preference.difficulty_level,
-        quiz_format=preference.quiz_format
-    )
-    db.add(user_pref)
-    db.commit()
-    db.refresh(user_pref)
+    if existing_preference:
+        # Update existing preference
+        existing_preference.difficulty_level = preference.difficulty_level
+        existing_preference.quiz_format = preference.quiz_format
+    else:
+        # Create new preference entry
+        existing_preference = models.UserPreference(
+            user_id=current_user.id,
+            difficulty_level=preference.difficulty_level,
+            quiz_format=preference.quiz_format
+        )
+        db.add(existing_preference)
 
-    # Assign topics to user
+    # Commit changes to preferences
+    db.commit()
+    db.refresh(existing_preference)
+
+    # Clear existing user topics and add new ones
+    db.query(models.UserTopic).filter_by(user_id=current_user.id).delete()
     for topic_id in preference.topics:
         user_topic = models.UserTopic(user_id=current_user.id, topic_id=topic_id)
         db.add(user_topic)
+
     db.commit()
 
     # Fetch assigned topics to return in response
-    user_pref.topics = topics
+    existing_preference.topics = topics
 
-    return user_pref
+    return existing_preference
 
 # Get user preferences
 @router.get("/preferences", response_model=schemas.UserPreferenceResponse)
@@ -231,10 +239,10 @@ def create_quiz_prompt():
 def get_openai_llm():
     llm = ChatGoogleGenerativeAI(
     model="gemini-1.5-pro",
-    temperature=0.5,
+    temperature=0.8,
     max_tokens=None,
     timeout=None,
-    max_retries=2,
+    max_retries=3,
     # other params...
 )
     return llm
@@ -263,8 +271,35 @@ def generate_quiz_with_langchain(preferences, topics):
 
     return quiz_output
 
+@router.get("/quiz-by-topic/")
+def get_quiz_by_topic(topic_name: str, db: Session = Depends(get_db)):
+    # Fetch the topic by name
+    topic = db.query(models.Topic).filter(models.Topic.name == topic_name).first()
+    
+    if not topic:
+        raise HTTPException(status_code=404, detail="Topic not found")
+
+    # Fetch questions for the topic
+    questions = db.query(models.Question).filter(models.Question.topic_id == topic.id).all()
+    
+    # Prepare the response in the expected format
+    quiz_data = [
+        {
+            "question": question.question,
+            "options": json.loads(question.options),  # Convert options back to a list
+            "correct": question.correct,
+            "topic": topic.name
+        }
+        for question in questions
+    ]
+
+    return {"quiz": quiz_data}
+
+
 @router.post("/generate-quiz/")
-def generate_quiz(db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+def generate_quiz(db: Session = Depends(get_db),
+             current_user: models.User = Depends(get_current_user)
+             ):
     user_id = current_user.id
     # Fetch user preferences from the database
     preferences = db.query(models.UserPreference).filter(models.UserPreference.user_id == user_id).first()
@@ -284,6 +319,29 @@ def generate_quiz(db: Session = Depends(get_db), current_user: models.User = Dep
     # Generate quiz using OpenAI LLM through LangChain
     quiz_output = generate_quiz_with_langchain(preferences, topics)
 
+    # Extract quiz questions from the Pydantic model
+    quiz_data = quiz_output.root  # Access the root attribute
+
+    for item in quiz_data:
+        topic_name = item.topic  # Access topic directly
+        topic = db.query(models.Topic).filter_by(name=topic_name).first()
+        if not topic:
+            topic = models.Topic(name=topic_name)
+            db.add(topic)
+            db.commit()
+            db.refresh(topic)
+
+        question = models.Question(
+            topic_id=topic.id,
+            question=item.question,  # Access question text directly
+            options=json.dumps(item.options),  # Store options as JSON string
+            correct=item.correct  # Access correct answer directly
+        )
+        db.add(question)
+
+    db.commit()
+
+    
 
     return {"quiz": quiz_output}
 
@@ -460,9 +518,9 @@ def get_all_topics(db: Session = Depends(get_db)):
 @router.get("/profile", response_model=schemas.UserProfileResponse)
 def get_user_profile(
     db: Session = Depends(get_db), 
-    # current_user: models.User = Depends(get_current_user)
+    current_user: models.User = Depends(get_current_user)
 ):
-    user_id = 1  # Extracted from bearer token
+    user_id = current_user.id  # Extracted from bearer token
 
     # Fetch user information
     user = db.query(models.User).filter(models.User.id == user_id).first()

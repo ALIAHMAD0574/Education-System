@@ -1,5 +1,3 @@
-# accounts/routes.py
-
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from accounts import models, schemas, auth
